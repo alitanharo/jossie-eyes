@@ -16,8 +16,8 @@ if ! az account show &> /dev/null; then
     exit 1
 fi
 
-# Set subscription
-SUBSCRIPTION_ID="a070f414-2a22-4ea0-a545-565599d35f2d"
+# Set subscription (updated for new subscription)
+SUBSCRIPTION_ID="3f09e186-8cc7-49d9-8c4a-79bd6acba157"
 az account set --subscription $SUBSCRIPTION_ID
 
 # Get script directory
@@ -41,10 +41,10 @@ echo "This may take 10-15 minutes..."
 echo ""
 
 az deployment sub create \
-    --location westeurope \
+    --location northeurope \
     --template-file "$INFRA_DIR/main.bicep" \
     --parameters \
-        location=westeurope
+        location=northeurope
 
 echo ""
 echo "========================================="

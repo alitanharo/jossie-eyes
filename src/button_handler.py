@@ -36,19 +36,28 @@ class ButtonHandler:
         self.buttons = []
         self.debounce_time = 0.3  # seconds
         
-        # Try to import RPi.GPIO
+        # Try to import RPi.GPIO or gpiozero
+        self.GPIO = None
+        self.gpio_available = False
+        self.gpiozero_available = False
+        
+        # Try RPi.GPIO first
         try:
             import RPi.GPIO as GPIO
             self.GPIO = GPIO
             self.gpio_available = True
             logger.info("RPi.GPIO available")
         except ImportError:
-            logger.warning("RPi.GPIO not available - using keyboard simulation mode")
-            self.GPIO = None
-            self.gpio_available = False
+            # Try gpiozero as fallback (better for Pi 5)
+            try:
+                from gpiozero import Button
+                self.gpiozero_available = True
+                logger.info("gpiozero available (preferred for Pi 5)")
+            except ImportError:
+                logger.warning("Neither RPi.GPIO nor gpiozero available - using keyboard simulation mode")
     
     def setup_gpio(self):
-        """Setup GPIO pins for buttons"""
+        """Setup GPIO pins for buttons using RPi.GPIO"""
         if not self.gpio_available:
             return
         
@@ -77,7 +86,26 @@ class ButtonHandler:
             bouncetime=300
         )
         
-        logger.info(f"GPIO buttons configured: Describe(17), OCR(27), Neural(22)")
+        logger.info(f"GPIO buttons configured (RPi.GPIO): Describe(17), OCR(27), Neural(22)")
+    
+    def setup_gpiozero(self):
+        """Setup GPIO pins for buttons using gpiozero (preferred for Pi 5)"""
+        if not self.gpiozero_available:
+            return
+        
+        from gpiozero import Button
+        
+        # Create button objects with internal pull-up resistors
+        self.btn_describe = Button(self.BUTTON_DESCRIBE, pull_up=True)
+        self.btn_ocr = Button(self.BUTTON_OCR, pull_up=True)
+        self.btn_neural = Button(self.BUTTON_NEURAL, pull_up=True)
+        
+        # Set up event handlers
+        self.btn_describe.when_pressed = lambda: self._on_describe_pressed(None)
+        self.btn_ocr.when_pressed = lambda: self._on_ocr_pressed(None)
+        self.btn_neural.when_pressed = lambda: self._on_neural_pressed(None)
+        
+        logger.info(f"GPIO buttons configured (gpiozero): Describe(17), OCR(27), Neural(22)")
     
     def _on_describe_pressed(self, channel):
         """Callback for describe button"""
@@ -118,9 +146,14 @@ class ButtonHandler:
         """Start the button handler"""
         self.running = True
         
-        if self.gpio_available:
+        if self.gpiozero_available:
+            # Use gpiozero (preferred for Pi 5)
+            self.setup_gpiozero()
+            logger.info("GPIO button handler started (gpiozero)")
+        elif self.gpio_available:
+            # Fallback to RPi.GPIO
             self.setup_gpio()
-            logger.info("GPIO button handler started")
+            logger.info("GPIO button handler started (RPi.GPIO)")
         else:
             # Start keyboard input thread for testing
             keyboard_thread = threading.Thread(target=self._keyboard_input_loop)

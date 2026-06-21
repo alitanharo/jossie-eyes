@@ -3,7 +3,7 @@
 
 targetScope = 'subscription'
 
-param location string = 'westeurope'
+param location string = 'northeurope'
 param suffix string = uniqueString(subscription().id)
 param resourceName string = 'jossieeyes${suffix}'
 param openAiModelName string = 'gpt-4o'

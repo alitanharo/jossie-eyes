@@ -1,0 +1,281 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2018-05-01/subscriptionDeploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "_generator": {
+      "name": "bicep",
+      "version": "0.44.1.10279",
+      "templateHash": "2396035335668839875"
+    }
+  },
+  "parameters": {
+    "location": {
+      "type": "string",
+      "defaultValue": "westeurope"
+    },
+    "suffix": {
+      "type": "string",
+      "defaultValue": "[uniqueString(subscription().id)]"
+    },
+    "resourceName": {
+      "type": "string",
+      "defaultValue": "[format('jossieeyes{0}', parameters('suffix'))]"
+    },
+    "openAiModelName": {
+      "type": "string",
+      "defaultValue": "gpt-4o"
+    },
+    "openAiModelVersion": {
+      "type": "string",
+      "defaultValue": "2024-08-06"
+    },
+    "openAiModelFormat": {
+      "type": "string",
+      "defaultValue": "OpenAI"
+    },
+    "openAiSkuName": {
+      "type": "string",
+      "defaultValue": "Standard"
+    },
+    "openAiCapacity": {
+      "type": "int",
+      "defaultValue": 20
+    }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Resources/resourceGroups",
+      "apiVersion": "2021-04-01",
+      "name": "rg-jossie-eyes",
+      "location": "[parameters('location')]"
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "jossie-eyes-resources",
+      "resourceGroup": "rg-jossie-eyes",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "resourceName": {
+            "value": "[parameters('resourceName')]"
+          },
+          "openAiModelName": {
+            "value": "[parameters('openAiModelName')]"
+          },
+          "openAiModelVersion": {
+            "value": "[parameters('openAiModelVersion')]"
+          },
+          "openAiModelFormat": {
+            "value": "[parameters('openAiModelFormat')]"
+          },
+          "openAiSkuName": {
+            "value": "[parameters('openAiSkuName')]"
+          },
+          "openAiCapacity": {
+            "value": "[parameters('openAiCapacity')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.44.1.10279",
+              "templateHash": "8091533460254497750"
+            }
+          },
+          "parameters": {
+            "location": {
+              "type": "string"
+            },
+            "resourceName": {
+              "type": "string"
+            },
+            "openAiModelName": {
+              "type": "string"
+            },
+            "openAiModelVersion": {
+              "type": "string"
+            },
+            "openAiModelFormat": {
+              "type": "string"
+            },
+            "openAiSkuName": {
+              "type": "string"
+            },
+            "openAiCapacity": {
+              "type": "int"
+            }
+          },
+          "resources": [
+            {
+              "type": "Microsoft.CognitiveServices/accounts",
+              "apiVersion": "2023-05-01",
+              "name": "[format('{0}openai', parameters('resourceName'))]",
+              "location": "[parameters('location')]",
+              "sku": {
+                "name": "S0"
+              },
+              "kind": "OpenAI",
+              "properties": {
+                "customSubDomainName": "[format('{0}openai', parameters('resourceName'))]",
+                "publicNetworkAccess": "Enabled"
+              }
+            },
+            {
+              "type": "Microsoft.CognitiveServices/accounts/deployments",
+              "apiVersion": "2023-05-01",
+              "name": "[format('{0}/{1}', format('{0}openai', parameters('resourceName')), parameters('openAiModelName'))]",
+              "sku": {
+                "name": "[parameters('openAiSkuName')]",
+                "capacity": "[parameters('openAiCapacity')]"
+              },
+              "properties": {
+                "model": {
+                  "format": "[parameters('openAiModelFormat')]",
+                  "name": "[parameters('openAiModelName')]",
+                  "version": "[parameters('openAiModelVersion')]"
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.CognitiveServices/accounts', format('{0}openai', parameters('resourceName')))]"
+              ]
+            },
+            {
+              "type": "Microsoft.CognitiveServices/accounts",
+              "apiVersion": "2023-05-01",
+              "name": "[format('{0}aiservices', parameters('resourceName'))]",
+              "location": "[parameters('location')]",
+              "sku": {
+                "name": "S0"
+              },
+              "kind": "CognitiveServices",
+              "properties": {
+                "customSubDomainName": "[format('{0}aiservices', parameters('resourceName'))]",
+                "publicNetworkAccess": "Enabled",
+                "apiProperties": {
+                  "statisticsEnabled": false
+                }
+              }
+            },
+            {
+              "type": "Microsoft.MachineLearningServices/workspaces",
+              "apiVersion": "2024-04-01",
+              "name": "[format('{0}aihub', parameters('resourceName'))]",
+              "location": "[parameters('location')]",
+              "sku": {
+                "name": "Basic",
+                "tier": "Basic"
+              },
+              "kind": "Hub",
+              "identity": {
+                "type": "SystemAssigned"
+              },
+              "properties": {
+                "friendlyName": "Jossie Eyes AI Hub",
+                "description": "AI Hub for Jossie Eyes assistive device",
+                "publicNetworkAccess": "Enabled",
+                "hbiWorkspace": false
+              }
+            },
+            {
+              "type": "Microsoft.MachineLearningServices/workspaces",
+              "apiVersion": "2024-04-01",
+              "name": "[format('{0}aiproject', parameters('resourceName'))]",
+              "location": "[parameters('location')]",
+              "sku": {
+                "name": "Basic",
+                "tier": "Basic"
+              },
+              "kind": "Project",
+              "identity": {
+                "type": "SystemAssigned"
+              },
+              "properties": {
+                "friendlyName": "Jossie Eyes AI Project",
+                "description": "AI Project for Jossie Eyes assistive device",
+                "publicNetworkAccess": "Enabled",
+                "hbiWorkspace": false,
+                "hubResourceId": "[resourceId('Microsoft.MachineLearningServices/workspaces', format('{0}aihub', parameters('resourceName')))]"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.MachineLearningServices/workspaces', format('{0}aihub', parameters('resourceName')))]"
+              ]
+            }
+          ],
+          "outputs": {
+            "openAiEndpoint": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.CognitiveServices/accounts', format('{0}openai', parameters('resourceName'))), '2023-05-01').endpoint]"
+            },
+            "openAiName": {
+              "type": "string",
+              "value": "[format('{0}openai', parameters('resourceName'))]"
+            },
+            "aiServicesEndpoint": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.CognitiveServices/accounts', format('{0}aiservices', parameters('resourceName'))), '2023-05-01').endpoint]"
+            },
+            "aiServicesName": {
+              "type": "string",
+              "value": "[format('{0}aiservices', parameters('resourceName'))]"
+            },
+            "aiHubName": {
+              "type": "string",
+              "value": "[format('{0}aihub', parameters('resourceName'))]"
+            },
+            "aiProjectName": {
+              "type": "string",
+              "value": "[format('{0}aiproject', parameters('resourceName'))]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', 'rg-jossie-eyes')]"
+      ]
+    }
+  ],
+  "outputs": {
+    "openAiEndpoint": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, 'rg-jossie-eyes'), 'Microsoft.Resources/deployments', 'jossie-eyes-resources'), '2025-04-01').outputs.openAiEndpoint.value]"
+    },
+    "openAiName": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, 'rg-jossie-eyes'), 'Microsoft.Resources/deployments', 'jossie-eyes-resources'), '2025-04-01').outputs.openAiName.value]"
+    },
+    "aiServicesEndpoint": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, 'rg-jossie-eyes'), 'Microsoft.Resources/deployments', 'jossie-eyes-resources'), '2025-04-01').outputs.aiServicesEndpoint.value]"
+    },
+    "aiServicesName": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, 'rg-jossie-eyes'), 'Microsoft.Resources/deployments', 'jossie-eyes-resources'), '2025-04-01').outputs.aiServicesName.value]"
+    },
+    "aiHubName": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, 'rg-jossie-eyes'), 'Microsoft.Resources/deployments', 'jossie-eyes-resources'), '2025-04-01').outputs.aiHubName.value]"
+    },
+    "aiProjectName": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, 'rg-jossie-eyes'), 'Microsoft.Resources/deployments', 'jossie-eyes-resources'), '2025-04-01').outputs.aiProjectName.value]"
+    },
+    "resourceGroupName": {
+      "type": "string",
+      "value": "rg-jossie-eyes"
+    },
+    "location": {
+      "type": "string",
+      "value": "[parameters('location')]"
+    }
+  }
+}

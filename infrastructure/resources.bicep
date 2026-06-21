@@ -14,7 +14,8 @@ resource openai 'Microsoft.CognitiveServices/accounts@2023-05-01' = {
   name: '${resourceName}openai'
   location: location
   sku: {
-    name: 'S0'
+    name: 'Standard'
+    tier: 'Standard'
   }
   kind: 'OpenAI'
   properties: {
@@ -45,7 +46,7 @@ resource aiServices 'Microsoft.CognitiveServices/accounts@2023-05-01' = {
   name: '${resourceName}aiservices'
   location: location
   sku: {
-    name: 'S0'
+    name: 'Standard'
   }
   kind: 'CognitiveServices'
   properties: {
