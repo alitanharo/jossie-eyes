@@ -43,8 +43,7 @@ echo ""
 az deployment sub create \
     --location northeurope \
     --template-file "$INFRA_DIR/main.bicep" \
-    --parameters \
-        location=northeurope
+    --parameters location=northeurope
 
 echo ""
 echo "========================================="
@@ -61,8 +60,6 @@ DEPLOYMENT_OUTPUTS=$(az deployment sub show \
 
 # Extract values
 RESOURCE_GROUP=$(echo "$DEPLOYMENT_OUTPUTS" | jq -r '.resourceGroupName.value // empty')
-OPENAI_ENDPOINT=$(echo "$DEPLOYMENT_OUTPUTS" | jq -r '.openAiEndpoint.value // empty')
-OPENAI_NAME=$(echo "$DEPLOYMENT_OUTPUTS" | jq -r '.openAiName.value // empty')
 AI_SERVICES_ENDPOINT=$(echo "$DEPLOYMENT_OUTPUTS" | jq -r '.aiServicesEndpoint.value // empty' 2>/dev/null)
 AI_SERVICES_NAME=$(echo "$DEPLOYMENT_OUTPUTS" | jq -r '.aiServicesName.value // empty' 2>/dev/null)
 
@@ -70,22 +67,16 @@ echo ""
 echo "=== Deployment Summary ==="
 echo ""
 echo "Resource Group: $RESOURCE_GROUP"
-echo "OpenAI Endpoint: $OPENAI_ENDPOINT"
-echo "OpenAI Service: $OPENAI_NAME"
 echo "AI Services Endpoint: $AI_SERVICES_ENDPOINT"
 echo "AI Services Name: $AI_SERVICES_NAME"
+echo ""
+echo "Note: For GPT-4o Vision, you'll need to provide your OpenAI API key separately."
+echo "Set OPENAI_API_KEY in your .env file."
 echo ""
 
 # Get keys
 echo "Getting API keys..."
 echo ""
-
-# Get OpenAI key
-OPENAI_KEY=$(az cognitiveservices account keys list \
-    --name "$OPENAI_NAME" \
-    --resource-group "$RESOURCE_GROUP" \
-    --query key1 \
-    -o tsv 2>/dev/null || echo "")
 
 # Get AI Services key
 AI_SERVICES_KEY=$(az cognitiveservices account keys list \
@@ -96,7 +87,6 @@ AI_SERVICES_KEY=$(az cognitiveservices account keys list \
 
 echo "=== API Keys ==="
 echo ""
-echo "OpenAI Key: ${OPENAI_KEY:0:10}..."
 echo "AI Services Key: ${AI_SERVICES_KEY:0:10}..."
 echo ""
 
@@ -106,14 +96,14 @@ cat > "$PROJECT_DIR/.env" << EOF
 # Jossie Eyes - Environment Configuration
 # Generated on $(date)
 
-# Azure OpenAI
-AZURE_OPENAI_ENDPOINT=$OPENAI_ENDPOINT
-AZURE_OPENAI_KEY=$OPENAI_KEY
-AZURE_OPENAI_API_VERSION=2024-08-01-preview
+# OpenAI API (for GPT-4o Vision)
+# You must add your OpenAI API key manually:
+# OPENAI_API_KEY=sk-your-key-here
+OPENAI_API_VERSION=2024-08-01-preview
 
 # Azure AI Services (Speech & Vision)
 AZURE_SPEECH_KEY=$AI_SERVICES_KEY
-AZURE_SPEECH_REGION=westeurope
+AZURE_SPEECH_REGION=northeurope
 
 # Azure Subscription
 AZURE_SUBSCRIPTION_ID=$SUBSCRIPTION_ID

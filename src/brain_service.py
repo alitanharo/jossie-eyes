@@ -8,7 +8,7 @@ import json
 import base64
 from typing import Optional, Dict, Any
 from dotenv import load_dotenv
-from openai import AzureOpenAI
+from openai import OpenAI, AzureOpenAI
 from azure.cognitiveservices.speech import SpeechConfig, SpeechSynthesizer, ResultReason
 from azure.identity import DefaultAzureCredential, get_bearer_token_provider
 
@@ -22,7 +22,7 @@ class BrainService:
     """
     
     def __init__(self):
-        """Initialize the brain service with Azure AI clients"""
+        """Initialize the brain service with AI clients"""
         self.openai_client = self._init_openai()
         self.speech_config = self._init_speech()
         
@@ -33,22 +33,27 @@ class BrainService:
             'neural_simulation': self._get_neural_simulation_prompt()
         }
     
-    def _init_openai(self) -> AzureOpenAI:
-        """Initialize Azure OpenAI client"""
+    def _init_openai(self):
+        """Initialize OpenAI client (supports both Azure OpenAI and OpenAI direct API)"""
+        # Try OpenAI direct API first (preferred - no quota issues)
+        openai_api_key = os.getenv('OPENAI_API_KEY')
+        if openai_api_key:
+            print("Using OpenAI direct API")
+            return OpenAI(api_key=openai_api_key)
+        
+        # Fallback to Azure OpenAI
         endpoint = os.getenv('AZURE_OPENAI_ENDPOINT')
         api_key = os.getenv('AZURE_OPENAI_KEY')
         api_version = os.getenv('AZURE_OPENAI_API_VERSION', '2024-08-01-preview')
         
-        if not endpoint:
-            raise ValueError("AZURE_OPENAI_ENDPOINT environment variable is required")
-        
-        if api_key:
+        if endpoint and api_key:
+            print("Using Azure OpenAI")
             return AzureOpenAI(
                 api_version=api_version,
                 azure_endpoint=endpoint,
                 api_key=api_key
             )
-        else:
+        elif endpoint:
             # Try using Azure Identity (managed identity or CLI login)
             try:
                 credential = DefaultAzureCredential()
@@ -63,8 +68,12 @@ class BrainService:
                 )
             except Exception as e:
                 raise ValueError(
-                    "Azure OpenAI credentials not found. Set AZURE_OPENAI_KEY or use Azure CLI login."
+                    "OpenAI credentials not found. Set OPENAI_API_KEY or AZURE_OPENAI_KEY, or use Azure CLI login."
                 )
+        else:
+            raise ValueError(
+                "OpenAI credentials not found. Set OPENAI_API_KEY (recommended) or AZURE_OPENAI_ENDPOINT."
+            )
     
     def _init_speech(self) -> SpeechConfig:
         """Initialize Azure Speech Service configuration"""
@@ -133,8 +142,16 @@ and human elements to make the person feel truly present in the scene."""
         }
         
         try:
+            # Determine model based on client type
+            if isinstance(self.openai_client, OpenAI):
+                # OpenAI direct API
+                model = "gpt-4o"
+            else:
+                # Azure OpenAI
+                model = "gpt-4o"
+            
             response = self.openai_client.chat.completions.create(
-                model="gpt-4o",
+                model=model,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": [
