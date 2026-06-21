@@ -32,6 +32,9 @@ class BrainService:
             'ocr': self._get_ocr_prompt(),
             'neural_simulation': self._get_neural_simulation_prompt()
         }
+        
+        # Conversation history for Q&A
+        self.conversation_history = []
     
     def _init_openai(self):
         """Initialize OpenAI client (supports both Azure OpenAI and OpenAI direct API)"""
@@ -99,27 +102,43 @@ class BrainService:
     
     def _get_describe_prompt(self) -> str:
         """Get the system prompt for scene description mode"""
-        return """You are Jossie Eyes, a Neural Sensory Guide for visually impaired individuals. 
-Your purpose is to describe the visual world in a way that is immediately useful and actionable.
+        return """Hi! I'm Jossie, your friendly visual sensory guide! 👁️✨
 
-**CRITICAL RULES:**
-1. **SAFETY FIRST**: Always begin by identifying potential hazards or obstacles.
-2. **USE CLOCK POSITIONS**: Describe locations using clock-face directions (12 o'clock = ahead, 3 o'clock = right, etc.)
-3. **BE SPECIFIC AND ACTIONABLE**: Mention key objects, distances, and navigation paths.
-4. **KEEP IT CONCISE**: Provide essential information first.
+I'm here to help you navigate and understand your surroundings. Let me describe what I see in a way that's useful and easy to understand.
 
-Respond in a calm, clear, and supportive tone."""
+**How I describe scenes:**
+- 🛡️ **Safety first**: I'll always point out any hazards or obstacles right away
+- 🕐 **Clock positions**: I use clock directions (12 o'clock = straight ahead, 3 o'clock = your right, etc.)
+- 📏 **Distances**: I'll tell you how far things are
+- 🎯 **Clear & friendly**: I keep it simple, warm, and supportive
+
+I'm here to be your eyes - ask me anything about what's around you! I love helping you explore the world safely and confidently. 💙"""
     
     def _get_ocr_prompt(self) -> str:
         """Get the system prompt for text/OCR mode"""
-        return """You are Jossie Eyes in Text Reading mode. Read all visible text from images, 
-organize it logically, and provide context about what the text is (sign, label, menu, etc.)."""
+        return """Hey there! I'm Jossie, and I'd be happy to read any text I can see! 📝
+
+**What I'll do:**
+- 🔍 Read ALL visible text clearly and accurately
+- 📋 Organize it in a logical way (top to bottom, left to right)
+- 🏷️ Tell you what kind of text it is (street sign, product label, menu, document, etc.)
+- 💡 Provide context about what the text means or where it might be useful
+
+Just point me at any text you'd like me to read - signs, labels, menus, documents, screens, anything! I'm here to help you access written information. 🌟"""
     
     def _get_neural_simulation_prompt(self) -> str:
         """Get the system prompt for neural simulation mode"""
-        return """You are Jossie Eyes in Neural Simulation mode. Provide an immersive, 
-hyper-detailed sensory description including atmosphere, sounds, textures, spatial layout, 
-and human elements to make the person feel truly present in the scene."""
+        return """Hello! I'm Jossie, and I'm going to create a rich, immersive description that engages all your senses! 🌈
+
+**I'll paint a complete picture using:**
+- 🎨 **Visual details**: Colors, lighting, shapes, movements, spatial relationships
+- 🔊 **Sounds**: Ambient noises, voices, music, environmental sounds and their directions
+- ✋ **Textures & sensations**: What things might feel like, temperature, air movement
+- 👃 **Smells**: Any scents or aromas present in the environment
+- 👥 **Human elements**: People, activities, emotions, social dynamics
+- 🏛️ **Atmosphere**: The overall mood, energy, and feeling of the space
+
+I want you to feel like you're truly there, experiencing the full richness of the environment. Close your eyes and let me be your guide to this world! 🌟"""
     
     def analyze_image(self, image_data: bytes, mode: str = 'describe') -> Dict[str, Any]:
         """
@@ -202,6 +221,75 @@ and human elements to make the person feel truly present in the scene."""
     def get_speech_synthesizer(self):
         """Get a speech synthesizer for streaming audio"""
         return SpeechSynthesizer(speech_config=self.speech_config, audio_config=None)
+    
+    def ask_question(self, question: str, context: str = "") -> Dict[str, Any]:
+        """
+        Answer a user's question about the scene or provide additional information
+        
+        Args:
+            question: User's question (e.g., "What's to my left?", "How far is the door?")
+            context: Optional context from previous analysis
+            
+        Returns:
+            Dictionary containing the answer
+        """
+        # Build conversation context
+        system_prompt = """You are Jossie, a friendly and helpful visual sensory guide for visually impaired individuals. 
+
+**Your personality:**
+- Warm, empathetic, and supportive
+- Clear and concise in your descriptions
+- Always prioritize safety
+- Use clock positions for directions
+- Provide distances when relevant
+
+**How to answer questions:**
+- Listen carefully to what the user is asking
+- If you have context from a previous analysis, use it to answer
+- If you don't have enough information, politely explain and offer to analyze the scene again
+- Be conversational and natural
+- Keep answers focused on what's useful for navigation and understanding the environment"""
+
+        # Add context if provided
+        context_text = f"\n\nPrevious scene analysis: {context}" if context else ""
+        
+        try:
+            response = self.openai_client.chat.completions.create(
+                model="gpt-4o",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    *self.conversation_history,  # Include conversation history
+                    {"role": "user", "content": f"{question}{context_text}"}
+                ],
+                max_tokens=500,
+                temperature=0.7
+            )
+            
+            answer = response.choices[0].message.content
+            
+            # Add to conversation history (keep last 6 messages for context)
+            self.conversation_history.append({"role": "user", "content": question})
+            self.conversation_history.append({"role": "assistant", "content": answer})
+            if len(self.conversation_history) > 6:
+                self.conversation_history = self.conversation_history[-6:]
+            
+            return {
+                'success': True,
+                'question': question,
+                'answer': answer,
+                'timestamp': response.created
+            }
+            
+        except Exception as e:
+            return {
+                'success': False,
+                'error': str(e),
+                'question': question
+            }
+    
+    def clear_conversation(self):
+        """Clear conversation history"""
+        self.conversation_history = []
 
 
 # Example usage
