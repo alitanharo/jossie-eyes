@@ -186,7 +186,7 @@ To give you the experience of truly being present in a space, not just knowing a
         try:
             # Determine which features to analyze based on mode
             if mode == 'ocr':
-                features = [VisualFeatures.OCR]
+                features = [VisualFeatures.READ]
             else:
                 features = [
                     VisualFeatures.CAPTION,
@@ -236,27 +236,29 @@ To give you the experience of truly being present in a space, not just knowing a
             parts.append(result.caption.text)
         
         # Add dense captions for more detail
-        if result.dense_captions:
-            for caption in result.dense_captions[:3]:
+        if result.dense_captions and result.dense_captions.list:
+            for caption in result.dense_captions.list[:3]:
                 parts.append(caption.text)
-        
-        # Add objects detected
-        if result.objects:
-            objects_list = [obj.name for obj in result.objects[:5]]
+
+        # Add objects detected (each object has a list of tags, not a single name)
+        if result.objects and result.objects.list:
+            objects_list = [
+                obj.tags[0].name for obj in result.objects.list[:5] if obj.tags
+            ]
             if objects_list:
                 parts.append(f"I can see: {', '.join(objects_list)}")
-        
+
         # Add people if detected
-        if result.people:
-            count = len(result.people)
+        if result.people and result.people.list:
+            count = len(result.people.list)
             if count == 1:
                 parts.append("There is one person in the scene.")
             else:
                 parts.append(f"There are {count} people in the scene.")
-        
+
         # Add tags for additional context
-        if result.tags:
-            tags = [tag.name for tag in result.tags[:5] if tag.confidence > 0.7]
+        if result.tags and result.tags.list:
+            tags = [tag.name for tag in result.tags.list[:5] if tag.confidence > 0.7]
             if tags:
                 parts.append(f"The scene appears to be: {', '.join(tags)}")
         
@@ -276,14 +278,14 @@ To give you the experience of truly being present in a space, not just knowing a
     
     def _format_ocr_result(self, result) -> str:
         """Format OCR results into readable text"""
-        if not result.ocr:
+        if not result.read or not result.read.blocks:
             return "I'm not seeing any readable text in this image."
-        
+
         texts = []
-        for line in result.ocr:
-            for word in line:
-                texts.append(word.text)
-        
+        for block in result.read.blocks:
+            for line in block.lines:
+                texts.append(line.text)
+
         if texts:
             return f"Here's the text I can read: {' '.join(texts)}"
         return "I can see some text but I'm having trouble reading it clearly."

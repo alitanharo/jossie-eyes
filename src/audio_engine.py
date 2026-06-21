@@ -7,6 +7,7 @@ import os
 import io
 import logging
 import threading
+import time
 from typing import Optional
 from dotenv import load_dotenv
 
@@ -57,12 +58,35 @@ class AudioEngine:
         try:
             import pyaudio
             self.pyaudio = pyaudio
-            self.audio_playback_available = True
-            logger.info("PyAudio available for local playback")
+
+            # Importing pyaudio doesn't mean a real output device exists.
+            # Opening/writing to a stream when there's no usable ALSA
+            # output device can crash the whole process at the native
+            # PortAudio/ALSA level (not a catchable Python exception), so
+            # check device presence first and never attempt playback if
+            # none is found.
+            p = pyaudio.PyAudio()
+            try:
+                has_output_device = any(
+                    p.get_device_info_by_index(i)['maxOutputChannels'] > 0
+                    for i in range(p.get_device_count())
+                )
+            finally:
+                p.terminate()
+
+            self.audio_playback_available = has_output_device
+            if has_output_device:
+                logger.info("PyAudio available for local playback")
+            else:
+                logger.warning("No audio output device found - speech will be saved to .wav files instead")
         except ImportError:
             self.pyaudio = None
             self.audio_playback_available = False
             logger.warning("PyAudio not available - audio playback limited")
+        except Exception as e:
+            self.pyaudio = None
+            self.audio_playback_available = False
+            logger.warning(f"Audio device check failed: {e}")
     
     def speak(self, text: str, async_mode: bool = True):
         """
@@ -130,7 +154,6 @@ class AudioEngine:
     def _save_audio(self, audio_data: bytes, filename: str):
         """Save audio data to file"""
         import wave
-        import time
         
         try:
             with wave.open(filename, 'wb') as wf:

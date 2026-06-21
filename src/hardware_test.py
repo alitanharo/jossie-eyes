@@ -17,30 +17,23 @@ def test_camera() -> Tuple[bool, str]:
     print("\n📷 Testing Camera...")
     
     try:
-        import cv2
-        
-        # Try to open camera
-        cap = cv2.VideoCapture(0)
-        
-        if not cap.isOpened():
-            return False, "Camera not detected"
-        
-        # Try to capture a frame
-        ret, frame = cap.read()
-        
-        if not ret:
-            cap.release()
-            return False, "Failed to capture frame"
-        
-        # Get frame dimensions
+        from picamera2 import Picamera2
+
+        cam = Picamera2()
+        config = cam.create_video_configuration(main={"size": (1280, 720), "format": "RGB888"})
+        cam.configure(config)
+        cam.start()
+        time.sleep(1)
+
+        frame = cam.capture_array("main")
+        cam.stop()
+
         height, width = frame.shape[:2]
-        
-        cap.release()
-        
+
         return True, f"Camera working! Resolution: {width}x{height}"
-        
+
     except ImportError:
-        return False, "OpenCV not installed"
+        return False, "picamera2 not installed"
     except Exception as e:
         return False, f"Error: {str(e)}"
 

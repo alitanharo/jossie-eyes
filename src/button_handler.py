@@ -4,6 +4,7 @@ GPIO button listeners for Raspberry Pi
 """
 
 import logging
+import os
 import threading
 import time
 from typing import Callable, Optional
@@ -40,7 +41,16 @@ class ButtonHandler:
         self.GPIO = None
         self.gpio_available = False
         self.gpiozero_available = False
-        
+
+        # GPIO libraries (RPi.GPIO / gpiozero) can be importable even with no
+        # physical buttons wired up (e.g. gpiozero ships system-wide on
+        # Raspberry Pi OS and leaks into venvs built with
+        # --system-site-packages). Only probe for them if explicitly opted
+        # into, so keyboard input is the default until real buttons exist.
+        if os.environ.get('JOSSIE_USE_GPIO', '').lower() not in ('1', 'true', 'yes'):
+            logger.info("GPIO disabled (set JOSSIE_USE_GPIO=1 to enable) - using keyboard simulation mode")
+            return
+
         # Try RPi.GPIO first
         try:
             import RPi.GPIO as GPIO

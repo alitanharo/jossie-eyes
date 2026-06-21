@@ -47,24 +47,24 @@ class EdgeDevice:
         self._init_services()
     
     def _init_camera(self):
-        """Initialize the camera"""
+        """Initialize the camera (picamera2 / libcamera, for the Pi CSI camera module)"""
         try:
-            import cv2
-            self.camera = cv2.VideoCapture(0)
-            
-            # Set camera properties for better quality
-            self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-            self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
-            self.camera.set(cv2.CAP_PROP_AUTOFOCUS, 1)
-            self.camera.set(cv2.CAP_PROP_AUTO_EXPOSURE, 3)  # Auto exposure
-            
+            from picamera2 import Picamera2
+
+            self.camera = Picamera2()
+            config = self.camera.create_video_configuration(
+                main={"size": (1280, 720), "format": "RGB888"}
+            )
+            self.camera.configure(config)
+            self.camera.start()
+
             # Warm up the camera
             time.sleep(2)
-            
+
             logger.info("Camera initialized successfully")
-            
+
         except ImportError:
-            logger.warning("OpenCV not available - running in simulation mode")
+            logger.warning("picamera2 not available - running in simulation mode")
             self.camera = None
         except Exception as e:
             logger.error(f"Failed to initialize camera: {e}")
@@ -102,24 +102,19 @@ class EdgeDevice:
             except:
                 return None
         
-        # Capture multiple frames to ensure good quality
-        for _ in range(5):
-            ret, frame = self.camera.read()
-            if not ret:
-                continue
-        
-        # Capture the actual image
-        ret, frame = self.camera.read()
-        if not ret:
-            logger.error("Failed to capture image")
+        try:
+            from PIL import Image
+            from io import BytesIO
+
+            frame = self.camera.capture_array("main")
+
+            image = Image.fromarray(frame)
+            buffer = BytesIO()
+            image.save(buffer, format="JPEG", quality=85)
+            return buffer.getvalue()
+        except Exception as e:
+            logger.error(f"Failed to capture image: {e}")
             return None
-        
-        # Encode to JPEG
-        import cv2
-        encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 85]
-        _, buffer = cv2.imencode('.jpg', frame, encode_param)
-        
-        return buffer.tobytes()
     
     def process_scene(self, mode: str = 'describe'):
         """
@@ -212,7 +207,7 @@ class EdgeDevice:
             self.button_handler.stop()
         
         if self.camera:
-            self.camera.release()
+            self.camera.stop()
         
         logger.info("Jossie Eyes stopped")
 
