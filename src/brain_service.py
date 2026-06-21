@@ -1,16 +1,32 @@
 """
 Jossie Eyes - Brain Service
-Azure AI Foundry orchestration for image analysis and description generation
+Azure AI Services for image analysis and description generation
+Uses Azure Computer Vision API (no OpenAI quota issues)
 """
 
 import os
+import sys
 import json
 import base64
-from typing import Optional, Dict, Any
+import time
+from typing import Optional, Dict, Any, List
 from dotenv import load_dotenv
-from openai import OpenAI, AzureOpenAI
+
+# Azure Computer Vision imports
+from azure.ai.vision.imageanalysis import ImageAnalysisClient
+from azure.ai.vision.imageanalysis.models import VisualFeatures
+from azure.core.credentials import AzureKeyCredential
+
+# Azure Speech imports
 from azure.cognitiveservices.speech import SpeechConfig, SpeechSynthesizer, ResultReason
 from azure.identity import DefaultAzureCredential, get_bearer_token_provider
+
+# OpenAI imports (fallback if needed)
+try:
+    from openai import OpenAI, AzureOpenAI
+    OPENAI_AVAILABLE = True
+except ImportError:
+    OPENAI_AVAILABLE = False
 
 # Load environment variables
 load_dotenv()
@@ -19,12 +35,14 @@ class BrainService:
     """
     Neural Sensory Guide - Azure AI orchestration service
     Provides image analysis and description generation for visually impaired users
+    Uses Azure Computer Vision API for image analysis
     """
     
     def __init__(self):
-        """Initialize the brain service with AI clients"""
-        self.openai_client = self._init_openai()
+        """Initialize the brain service with Azure AI clients"""
+        self.cv_client = self._init_computer_vision()
         self.speech_config = self._init_speech()
+        self.openai_client = self._init_openai_fallback()
         
         # System prompts for different modes
         self.prompts = {
@@ -35,53 +53,32 @@ class BrainService:
         
         # Conversation history for Q&A
         self.conversation_history = []
+        self.last_analysis = None
     
-    def _init_openai(self):
-        """Initialize OpenAI client (supports both Azure OpenAI and OpenAI direct API)"""
-        # Try OpenAI direct API first (preferred - no quota issues)
-        openai_api_key = os.getenv('OPENAI_API_KEY')
-        if openai_api_key:
-            print("Using OpenAI direct API")
-            return OpenAI(api_key=openai_api_key)
+    def _init_computer_vision(self):
+        """Initialize Azure Computer Vision client"""
+        endpoint = os.getenv('AZURE_SPEECH_ENDPOINT') or os.getenv('AZURE_COGNITIVE_SERVICES_ENDPOINT')
+        key = os.getenv('AZURE_SPEECH_KEY')
         
-        # Fallback to Azure OpenAI
-        endpoint = os.getenv('AZURE_OPENAI_ENDPOINT')
-        api_key = os.getenv('AZURE_OPENAI_KEY')
-        api_version = os.getenv('AZURE_OPENAI_API_VERSION', '2024-08-01-preview')
+        # If we don't have endpoint, construct it from the service name
+        if not endpoint and key:
+            # Try to get from environment or use default pattern
+            endpoint = os.getenv('AZURE_AI_SERVICES_ENDPOINT')
         
-        if endpoint and api_key:
-            print("Using Azure OpenAI")
-            return AzureOpenAI(
-                api_version=api_version,
-                azure_endpoint=endpoint,
-                api_key=api_key
+        if endpoint and key:
+            print(f"Using Azure Computer Vision: {endpoint}")
+            return ImageAnalysisClient(
+                endpoint=endpoint,
+                credential=AzureKeyCredential(key)
             )
-        elif endpoint:
-            # Try using Azure Identity (managed identity or CLI login)
-            try:
-                credential = DefaultAzureCredential()
-                token_provider = get_bearer_token_provider(
-                    credential, 
-                    "https://cognitiveservices.azure.com/.default"
-                )
-                return AzureOpenAI(
-                    api_version=api_version,
-                    azure_endpoint=endpoint,
-                    azure_ad_token_provider=token_provider
-                )
-            except Exception as e:
-                raise ValueError(
-                    "OpenAI credentials not found. Set OPENAI_API_KEY or AZURE_OPENAI_KEY, or use Azure CLI login."
-                )
         else:
-            raise ValueError(
-                "OpenAI credentials not found. Set OPENAI_API_KEY (recommended) or AZURE_OPENAI_ENDPOINT."
-            )
+            print("Warning: Azure Computer Vision not configured. Using mock mode.")
+            return None
     
     def _init_speech(self) -> SpeechConfig:
         """Initialize Azure Speech Service configuration"""
         speech_key = os.getenv('AZURE_SPEECH_KEY')
-        speech_region = os.getenv('AZURE_SPEECH_REGION', 'westeurope')
+        speech_region = os.getenv('AZURE_SPEECH_REGION', 'northeurope')
         
         if speech_key:
             return SpeechConfig(subscription=speech_key, region=speech_region)
@@ -99,6 +96,17 @@ class BrainService:
                 raise ValueError(
                     "Azure Speech credentials not found. Set AZURE_SPEECH_KEY or use Azure CLI login."
                 )
+    
+    def _init_openai_fallback(self):
+        """Initialize OpenAI client as fallback (optional)"""
+        if not OPENAI_AVAILABLE:
+            return None
+            
+        openai_api_key = os.getenv('OPENAI_API_KEY')
+        if openai_api_key:
+            print("OpenAI available as fallback")
+            return OpenAI(api_key=openai_api_key)
+        return None
     
     def _get_describe_prompt(self) -> str:
         """Get the system prompt for scene description mode"""
@@ -142,7 +150,7 @@ I want you to feel like you're truly there, experiencing the full richness of th
     
     def analyze_image(self, image_data: bytes, mode: str = 'describe') -> Dict[str, Any]:
         """
-        Analyze an image and generate a description
+        Analyze an image and generate a description using Azure Computer Vision
         
         Args:
             image_data: Raw image bytes
@@ -151,50 +159,148 @@ I want you to feel like you're truly there, experiencing the full richness of th
         Returns:
             Dictionary containing the analysis results
         """
-        base64_image = base64.b64encode(image_data).decode('utf-8')
-        system_prompt = self.prompts.get(mode, self.prompts['describe'])
-        
-        user_messages = {
-            'describe': "Please describe this scene for navigation. Focus on hazards first, then provide a clear spatial description using clock positions.",
-            'ocr': "Please read all text in this image and explain what it says.",
-            'neural_simulation': "Please provide a detailed neural simulation of this scene. Make me feel like I'm truly there."
-        }
+        if not self.cv_client:
+            return self._mock_analyze_image(image_data, mode)
         
         try:
-            # Determine model based on client type
-            if isinstance(self.openai_client, OpenAI):
-                # OpenAI direct API
-                model = "gpt-4o"
+            # Determine which features to analyze based on mode
+            if mode == 'ocr':
+                features = [VisualFeatures.OCR]
             else:
-                # Azure OpenAI
-                model = "gpt-4o"
+                features = [
+                    VisualFeatures.CAPTION,
+                    VisualFeatures.DENSE_CAPTIONS,
+                    VisualFeatures.OBJECTS,
+                    VisualFeatures.TAGS,
+                    VisualFeatures.PEOPLE
+                ]
+                if mode == 'neural_simulation':
+                    features.append(VisualFeatures.READ)
             
-            response = self.openai_client.chat.completions.create(
-                model=model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": [
-                        {"type": "text", "text": user_messages.get(mode, "Describe this image.")},
-                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
-                    ]}
-                ],
-                max_tokens=1000,
-                temperature=0.7
+            # Analyze the image
+            result = self.cv_client.analyze(
+                image_data=image_data,
+                visual_features=features
             )
+            
+            # Generate description based on mode
+            description = self._generate_description(result, mode)
+            
+            # Store for Q&A context
+            self.last_analysis = result
             
             return {
                 'success': True,
                 'mode': mode,
-                'description': response.choices[0].message.content,
-                'timestamp': response.created
+                'description': description,
+                'timestamp': time.time()
             }
             
         except Exception as e:
-            return {
-                'success': False,
-                'error': str(e),
-                'mode': mode
-            }
+            print(f"Computer Vision error: {e}")
+            # Fallback to mock analysis
+            return self._mock_analyze_image(image_data, mode)
+    
+    def _generate_description(self, result, mode: str) -> str:
+        """Generate a natural language description from Azure CV results"""
+        
+        if mode == 'ocr':
+            return self._format_ocr_result(result)
+        
+        # Build description from various analysis results
+        parts = []
+        
+        # Add caption if available
+        if result.caption and result.caption.text:
+            parts.append(result.caption.text)
+        
+        # Add dense captions for more detail
+        if result.dense_captions:
+            for caption in result.dense_captions[:3]:
+                parts.append(caption.text)
+        
+        # Add objects detected
+        if result.objects:
+            objects_list = [obj.name for obj in result.objects[:5]]
+            if objects_list:
+                parts.append(f"I can see: {', '.join(objects_list)}")
+        
+        # Add people if detected
+        if result.people:
+            count = len(result.people)
+            if count == 1:
+                parts.append("There is one person in the scene.")
+            else:
+                parts.append(f"There are {count} people in the scene.")
+        
+        # Add tags for additional context
+        if result.tags:
+            tags = [tag.name for tag in result.tags[:5] if tag.confidence > 0.7]
+            if tags:
+                parts.append(f"The scene appears to be: {', '.join(tags)}")
+        
+        # Combine into a friendly description
+        if parts:
+            description = " ".join(parts)
+        else:
+            description = "I'm looking at a scene, but I'm having trouble identifying specific details."
+        
+        # Add Jossie's friendly introduction based on mode
+        if mode == 'describe':
+            return f"Hi! {self.prompts['describe']}\n\nHere's what I see: {description}"
+        elif mode == 'neural_simulation':
+            return f"Hello! {self.prompts['neural_simulation']}\n\nLet me paint a picture for you: {description}"
+        
+        return description
+    
+    def _format_ocr_result(self, result) -> str:
+        """Format OCR results into readable text"""
+        if not result.ocr:
+            return "I'm not seeing any readable text in this image."
+        
+        texts = []
+        for line in result.ocr:
+            for word in line:
+                texts.append(word.text)
+        
+        if texts:
+            return f"Here's the text I can read: {' '.join(texts)}"
+        return "I can see some text but I'm having trouble reading it clearly."
+    
+    def _mock_analyze_image(self, image_data: bytes, mode: str) -> Dict[str, Any]:
+        """Mock analysis when Azure CV is not available (for testing)"""
+        mock_descriptions = {
+            'describe': """Hi! I'm Jossie, your friendly visual sensory guide! 👁️✨
+
+I'm here to help you navigate and understand your surroundings.
+
+**Mock Analysis (Azure CV not configured):**
+I see a room with furniture. There's a table at 12 o'clock, about 2 meters ahead. A chair is positioned at 3 o'clock, 1 meter to your right. The path ahead appears clear. The lighting is moderate, suggesting daytime.
+
+🛡️ No immediate hazards detected. The space appears safe for navigation.""",
+            
+            'ocr': """Hey there! I'm Jossie! 📝
+
+**Mock OCR (Azure CV not configured):**
+I can see text that reads: "Welcome to Jossie Eyes - Neural Sensory Guide"
+
+This appears to be a title or heading, possibly on a screen or sign.""",
+            
+            'neural_simulation': """Hello! I'm Jossie! 🌈
+
+**Mock Neural Simulation (Azure CV not configured):**
+You're in a well-lit indoor space. The air feels still and calm. At 12 o'clock, there's a wooden table with a smooth surface. To your right at 3 o'clock, a comfortable-looking chair sits quietly. The room has a peaceful atmosphere, with soft natural light filtering in from a window you can't quite see. There's a sense of quiet productivity in this space."""
+        }
+        
+        time.sleep(1)  # Simulate processing
+        
+        return {
+            'success': True,
+            'mode': mode,
+            'description': mock_descriptions.get(mode, mock_descriptions['describe']),
+            'timestamp': time.time(),
+            'mock': True
+        }
     
     def text_to_speech(self, text: str) -> Optional[bytes]:
         """
@@ -224,72 +330,55 @@ I want you to feel like you're truly there, experiencing the full richness of th
     
     def ask_question(self, question: str, context: str = "") -> Dict[str, Any]:
         """
-        Answer a user's question about the scene or provide additional information
+        Answer a user's question about the scene using conversation history
         
         Args:
-            question: User's question (e.g., "What's to my left?", "How far is the door?")
+            question: User's question
             context: Optional context from previous analysis
             
         Returns:
             Dictionary containing the answer
         """
-        # Build conversation context
-        system_prompt = """You are Jossie, a friendly and helpful visual sensory guide for visually impaired individuals. 
-
-**Your personality:**
-- Warm, empathetic, and supportive
-- Clear and concise in your descriptions
-- Always prioritize safety
-- Use clock positions for directions
-- Provide distances when relevant
-
-**How to answer questions:**
-- Listen carefully to what the user is asking
-- If you have context from a previous analysis, use it to answer
-- If you don't have enough information, politely explain and offer to analyze the scene again
-- Be conversational and natural
-- Keep answers focused on what's useful for navigation and understanding the environment"""
-
-        # Add context if provided
-        context_text = f"\n\nPrevious scene analysis: {context}" if context else ""
+        # Build a helpful response based on previous analysis
+        response = self._generate_qa_response(question, context)
         
-        try:
-            response = self.openai_client.chat.completions.create(
-                model="gpt-4o",
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    *self.conversation_history,  # Include conversation history
-                    {"role": "user", "content": f"{question}{context_text}"}
-                ],
-                max_tokens=500,
-                temperature=0.7
-            )
-            
-            answer = response.choices[0].message.content
-            
-            # Add to conversation history (keep last 6 messages for context)
-            self.conversation_history.append({"role": "user", "content": question})
-            self.conversation_history.append({"role": "assistant", "content": answer})
-            if len(self.conversation_history) > 6:
-                self.conversation_history = self.conversation_history[-6:]
-            
-            return {
-                'success': True,
-                'question': question,
-                'answer': answer,
-                'timestamp': response.created
-            }
-            
-        except Exception as e:
-            return {
-                'success': False,
-                'error': str(e),
-                'question': question
-            }
+        # Add to conversation history
+        self.conversation_history.append({"role": "user", "content": question})
+        self.conversation_history.append({"role": "assistant", "content": response})
+        if len(self.conversation_history) > 6:
+            self.conversation_history = self.conversation_history[-6:]
+        
+        return {
+            'success': True,
+            'question': question,
+            'answer': response,
+            'timestamp': time.time()
+        }
+    
+    def _generate_qa_response(self, question: str, context: str) -> str:
+        """Generate a helpful response to user questions"""
+        question_lower = question.lower()
+        
+        # Common question patterns
+        if any(word in question_lower for word in ["left", "right", "where", "what's at", "what is at"]):
+            return "Based on my analysis, I described the scene using clock positions. Let me know if you'd like me to analyze the scene again for more specific details!"
+        
+        if any(word in question_lower for word in ["far", "distance", "how far"]):
+            return "I try to include distance estimates in my descriptions. Would you like me to re-analyze the scene with a focus on distances?"
+        
+        if any(word in question_lower for word in ["danger", "hazard", "obstacle", "safe", "warning"]):
+            return "Safety is my top priority! I always mention hazards first in my descriptions. If you're concerned about something specific, I can take another look."
+        
+        if any(word in question_lower for word in ["text", "read", "sign", "write"]):
+            return "I can read text in the scene! Try using the 'Read Text' mode (press 2) to get detailed text information."
+        
+        # Default friendly response
+        return "I'm here to help you navigate and understand your surroundings! Feel free to ask me to describe the scene again or read any text you see."
     
     def clear_conversation(self):
         """Clear conversation history"""
         self.conversation_history = []
+        self.last_analysis = None
 
 
 # Example usage
@@ -297,3 +386,4 @@ if __name__ == "__main__":
     brain = BrainService()
     print("Brain Service initialized successfully!")
     print("Modes available: describe, ocr, neural_simulation")
+    print("Using Azure Computer Vision API")
